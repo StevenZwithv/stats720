@@ -1,0 +1,297 @@
+---
+title: "STATS 720 Assignment 1"
+format: 
+  pdf:
+    code-line-numbers: true
+author: "Steven Zeng 400260257"
+date: "Sep/19/2023"
+editor: visual
+execute: 
+  echo: false
+  message: false
+header-includes:
+  \usepackage{fvextra}
+  \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+bibliorgraphy: references.bib
+---
+
+\newpage
+
+```{r}
+#| message: false
+
+# load libraries
+library(tidyverse)
+library(dotwhisker)
+library(effects)
+library(car)
+library(lemon)
+library(MASS)
+```
+
+# 1. Dataset and modelling
+
+```{r}
+# convert mtcars to tibble
+mtcars <- as_tibble(mtcars)
+# print(mtcars,width=Inf,n=3)
+
+```
+
+For this question, I have picked `mtcars` dataset.
+
+## a.
+
+I plan to include two predictor variables: number of cylinders represented by cyl and weight of the car represented by wt. From Harrel's [@harrel] book, we know that the optimal number of predictors are less than $\frac{m}{15}$ where m is the limiting sample size which is `r nrow(mtcars)` in this case since mpg, the response variable is continuous.
+
+## b.
+
+Our Response variable mpg measures miles driven for every gallon of fuel consumed by each car model and it has a unit of miles per gallon. Two predictor variables are number of cylinders and weight which have a unit of 1 cylinder and 1000 pounds (lbs) respectively. I would consider a reasonable threshold for cylinders to change is 2 cylinders and 5 thousand-lbs for predictor variable weight.
+
+## c.
+
+We fit the model below.
+
+## d.
+
+We diagnose the model by plotting residuals vs. fitted value plot etc. As we can observe from the plot below, our original model exhibit a non-linear relationship as there is a moderate U shape in the residual vs. fitted value plot. Furthermore, I have decided to log transform our response variable mpg in order for the relationship between mpg and two predictor variables to be non-linear.
+
+```{r}
+# original model
+model <- lm(formula=mpg~cyl+wt,data=mtcars)
+
+# plot model evaluation graphs
+plot(x=model)
+```
+
+We model our log transformed model and again we plot diagnostic graphs. According to residual vs. fitted plot, our transformed model seems to pass linearity test and homoscedasticity test. The Q-Q plot looks fine as we have a small sample size although there is a mild deviation around the middle quantiles. Moreover, there does not seem to have any significant outliers nor high leverage point.
+
+```{r}
+### check *Linearity* between response variable ### and two predictors (residual vs. fitted)
+# log transform response variable mpg as there is
+# a non linear pattern in the residual vs. 
+# fitted plot
+model_adjusted <- lm(formula=log(mpg)~cyl+wt,data=mtcars)
+
+### check *homoscedasticity* of the error terms
+### (residual vs. fitted)
+#x11()
+#par(mfrow=c(2,2))
+plot(model_adjusted)
+
+### check for collinearity
+### vif less than 3 indicate no significant
+### collinearity between two predictor variables
+vif(model_adjusted)
+
+# re-scaling comes after log transform
+
+```
+
+## f.
+
+To draw a coefficient plot:
+
+```{r}
+# model coefficient plot
+dwplot(x=model_adjusted)
+```
+
+I have decided not to scale and center the predictors since we only have two predictor variables and they are of quantitative nature. Thus, the coefficient are easily interpretable [@gelman] [@schielzeth]. Although meaningless in the context, we have $e^{\beta_0}$ as the miles per gallon when the car model has zero cylinders and a weight of zero. $e^{\beta_1}$ is the decrease (since ${\beta_1<0}$) in miles per gallon when cylinder increases by 1 while holding weight of the car constant. $e^{\beta_2}$ is the decrease in miles per gallon (since $\beta_2<0$) when weight of the car increases by 1 thousand pound while holding constant the number of cylinders a car has.
+
+```{r}
+### to get summary statistics of the model
+S(model_adjusted)
+summary(model_adjusted)
+```
+
+## g.
+
+To draw an effects plot, we have:
+
+```{r}
+# plot an effect plot
+plot(allEffects(model_adjusted))
+
+```
+
+We can observe from above effects plot that as the number of cylinders increases, we have log transformed response variable miles per gallon decreases. Similar, when weight increases the log transformed miles per gallon decreases. Since log() function is monotonically increasing, we have miles per gallon decreases when cylinder increases or weight increases.
+
+# 2. Before-After-Control-Impact (BACI) designs
+
+Since we have $\overline y = C\beta$ where C is our contrasts matrix, $\beta = C^{-1}\overline y$.
+
+Below is our contrasts matrix as requested in the question:
+
+```{r}
+# custom contrasts
+c_inv <- matrix(c(1/2,1/2,0,0,-1,1,0,0,-1/2,-1/2,1/2,1/2,1,-1,-1,1),nrow=4,byrow=TRUE)
+```
+
+Below is our inverse of the contrasts matrix:
+
+```{r}
+# inverse contrasts matrix
+cmat <- MASS::fractions(solve(c_inv))
+print(cmat)
+
+d <- data.frame(Period=factor(c("Before","Before","After","After")),Treatment=factor(c("Control","Impact","Control","Impact")))
+```
+
+Below is the model matrix for Period + Treatment. Since we have two categorical variables and each has two levels (Before,After,Control,Impact), we will be needing two columns and four rows to represent each (Period,Treatment) combination.
+
+```{r}
+model.matrix(~Period+Treatment,d)
+```
+
+Below is the model matrix for Period*Treatment. The model matrix of Period*Treatment meaning we are including the two principle terms and also the interaction term which is the product of two dichotomous variables (0s and 1s). We then should be having a model matrix with columns of intercept, PeriodBefore, TreatmentControl, and the PeriodBefore:TreatmentImpact interaction term.
+
+```{r}
+model.matrix(~Period*Treatment,d)
+```
+
+Below is the model matrix for 0+Period:Treatment. We then would be having a model matrix with four interaction columns:
+
+```{r}
+# below is the model matrix for 0+Period:Treatment
+model.matrix(~0+Period:Treatment,d)
+```
+
+# 3. Simulation exercises to model misspecification
+
+```{r}
+### simulate a model which violates linearity
+
+# first we simulate our sample data
+sim_fun <- function(n = 100, slope = 1, sd = 1, intercept = 0,power=1) {
+    x <- runif(n)
+    y <- rnorm(n, intercept + slope *I(x^power), sd = sd)
+    data_ex = data.frame(x, y)
+    return (data_ex)
+}
+```
+
+```{r}
+# for one sample
+# we do linear modelling
+model_test <- function(slope,alpha=0.05){
+  true_slope <-  slope
+  data_ex = sim_fun()
+  lm_model <- lm(formula=y~x,data=data_ex)
+  slope_est <- coef(lm_model)[2]
+  p_val <- coef(summary(lm_model))[2, "Pr(>|t|)"]
+  between <- function(a, b) (b[1] < a & a < b[2])
+  conf_test <- between(true_slope, confint(lm_model)[2,]) # level = 1- alpha
+  data_model <- data.frame(slope_est,p_val,conf_test)
+  return(data_model)
+}
+```
+
+```{r}
+# for loop to simulate many times
+# sim is number of simulations
+# num is number of samples per simulation
+# power is the specific non-linear relationship
+# we want our model to violate (e.g., linear = 1,quadratic = 2 ...)
+simulation <- function(sim,num,power,slope){
+  i <- 0
+  results_simu = data.frame()
+  relationship = power
+  alpha = 0.05
+  
+  while (i < sim){
+    # return a data frame
+    sim_fun(n=num,power=power,slope=slope)
+    
+    # return a data frame
+    data_simu = model_test(slope=slope)
+    i = i + 1
+    
+    results_simu <-  rbind(results_simu,data_simu)
+  }
+  
+  bias = mean(results_simu$slope_est - slope)
+  standard_error = sd(results_simu$slope)
+  rmse = mean((results_simu$slope_est - slope)^2)
+  power <- results_simu %>% as_tibble() %>% transmute(power_test = if_else(p_val<0.05,TRUE,FALSE)) %>% summarise(power=mean(power_test))
+  coverage = mean(results_simu$conf_test)
+  num_of_simulations <-  sim
+  sample_size <-  num
+  if (relationship == 1){
+    relationship <- "linear"
+  } else if(relationship == 2){
+    relationship <- "quadratic"
+  } else if(relationship == 3){
+    relationship <- "cubic"
+  } else{
+    relationship <- paste(relationship,"th","power")
+  }
+  
+  result_out <- data.frame(relationship,num_of_simulations,sample_size,bias,standard_error,rmse,power,coverage) 
+  return(result_out)
+}
+```
+
+```{r}
+# function to loop through many simulation and 
+# different powers
+simulation_table <- function (sim,power_n){
+  table_output = data.frame()
+  
+  for (j in power_n){
+    for (i in sim){
+      output_ <- simulation(sim=i,num=100,power=j,slope=1)
+      
+      table_output = rbind(table_output,output_)
+  }
+  }
+  return(table_output)
+}
+
+```
+
+```{r}
+# input the number of simulations and power we
+# want our model to have, in this case we want 
+# to do 10 to 4000 simulations for every power # from 1 to 5
+sim = list(10,100,1000,2000,3000,4000)
+power_n = list(1,2,3,4,5)
+table_output <- simulation_table(sim=sim,power_n=power_n)
+```
+
+```{r, render = lemon_print}
+# nicely print out a table containing 
+# simulation, power and its corresponding bias
+# rmse etc...
+knit_print.data.frame <- lemon_print
+print(table_output)
+```
+
+We can observe from below plots that although we are assuming there is a linear relationship between y and x where the actual relationship is nonlinear (e.g., quadratic, cubic etc...):\
+- The value of bias converges to 0\
+- The value of standard error converges to 0.35\
+- The value of root mean standard error converges to 0.125\
+- The value of power converges to around 0.82\
+- The value of coverage converges to 0.95
+
+as we increase the number of simulations.
+
+```{r}
+# using graphs to display the change of bias,
+# rmse, coverage and power as number of 
+# simulation increases
+table_output <- as_tibble(table_output)
+ggplot(table_output,aes(x=num_of_simulations,y=bias,color=relationship)) + geom_path() + geom_point()
+
+table_output <- as_tibble(table_output)
+ggplot(table_output,aes(x=num_of_simulations,y=standard_error,color=relationship)) + geom_path() + geom_point()
+
+table_output <- as_tibble(table_output)
+ggplot(table_output,aes(x=num_of_simulations,y=rmse,color=relationship)) + geom_path() + geom_point()
+
+table_output <- as_tibble(table_output)
+ggplot(table_output,aes(x=num_of_simulations,y=power,color=relationship)) + geom_path() + geom_point()
+
+table_output <- as_tibble(table_output)
+ggplot(table_output,aes(x=num_of_simulations,y=coverage,color=relationship)) + geom_path() + geom_point()
+```
