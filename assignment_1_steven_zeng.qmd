@@ -295,3 +295,4 @@ ggplot(table_output,aes(x=num_of_simulations,y=power,color=relationship)) + geom
 table_output <- as_tibble(table_output)
 ggplot(table_output,aes(x=num_of_simulations,y=coverage,color=relationship)) + geom_path() + geom_point()
 ```
+\newpage
