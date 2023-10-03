@@ -12,7 +12,7 @@ execute:
 header-includes:
   \usepackage{fvextra}
   \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
-bibliorgraphy: references.bib
+bibliography: references.bib
 ---
 
 \newpage
@@ -48,6 +48,8 @@ I plan to include two predictor variables: number of cylinders represented by cy
 
 Our Response variable mpg measures miles driven for every gallon of fuel consumed by each car model and it has a unit of miles per gallon. Two predictor variables are number of cylinders and weight which have a unit of 1 cylinder and 1000 pounds (lbs) respectively. I would consider a reasonable threshold for cylinders to change is 2 cylinders and 5 thousand-lbs for predictor variable weight.
 
+**BMB**: OK. (these seem like *large* changes though)
+
 ## c.
 
 We fit the model below.
@@ -55,6 +57,8 @@ We fit the model below.
 ## d.
 
 We diagnose the model by plotting residuals vs. fitted value plot etc. As we can observe from the plot below, our original model exhibit a non-linear relationship as there is a moderate U shape in the residual vs. fitted value plot. Furthermore, I have decided to log transform our response variable mpg in order for the relationship between mpg and two predictor variables to be non-linear.
+
+**BMB**: I was going to say that this seems like a mild deviation from linearity, but `performance::check_model()` (which includes CIs on the smooth line) confirms that it's more significant than I thought. I'm a little surprised that log-transforming fixes the problem - it does induce a little more heteroscedasticity. `MASS::boxcox()` also confirms that log-transforming is a good idea ...
 
 ```{r}
 # original model
@@ -126,7 +130,10 @@ Below is our contrasts matrix as requested in the question:
 ```{r}
 # custom contrasts
 c_inv <- matrix(c(1/2,1/2,0,0,-1,1,0,0,-1/2,-1/2,1/2,1/2,1,-1,-1,1),nrow=4,byrow=TRUE)
+print(c_inv)
 ```
+
+**BMB**: the *first* matrix is the inverse-contrast matrix, the second is the contrast matrix ...
 
 Below is our inverse of the contrasts matrix:
 
@@ -144,7 +151,7 @@ Below is the model matrix for Period + Treatment. Since we have two categorical 
 model.matrix(~Period+Treatment,d)
 ```
 
-Below is the model matrix for Period*Treatment. The model matrix of Period*Treatment meaning we are including the two principle terms and also the interaction term which is the product of two dichotomous variables (0s and 1s). We then should be having a model matrix with columns of intercept, PeriodBefore, TreatmentControl, and the PeriodBefore:TreatmentImpact interaction term.
+Below is the model matrix for `Period*Treatment`. The model matrix of `Period*Treatment` meaning we are including the two principal terms and also the interaction term which is the product of two dichotomous variables (0s and 1s). We then should be having a model matrix with columns of intercept, `PeriodBefore`, `TreatmentControl` (**BMB**: that should be `TreatmentImpact` ...), and the `PeriodBefore:TreatmentImpact` interaction term.
 
 ```{r}
 model.matrix(~Period*Treatment,d)
@@ -165,6 +172,7 @@ model.matrix(~0+Period:Treatment,d)
 # first we simulate our sample data
 sim_fun <- function(n = 100, slope = 1, sd = 1, intercept = 0,power=1) {
     x <- runif(n)
+    ## BMB: you don't need I() here, it's not within a formula
     y <- rnorm(n, intercept + slope *I(x^power), sd = sd)
     data_ex = data.frame(x, y)
     return (data_ex)
@@ -187,7 +195,7 @@ model_test <- function(slope,alpha=0.05){
 }
 ```
 
-```{r}
+```{r sim_funs}
 # for loop to simulate many times
 # sim is number of simulations
 # num is number of samples per simulation
@@ -206,7 +214,8 @@ simulation <- function(sim,num,power,slope){
     # return a data frame
     data_simu = model_test(slope=slope)
     i = i + 1
-    
+
+    ## BMB: don't grow objects (see R Inferno chapter 3)
     results_simu <-  rbind(results_simu,data_simu)
   }
   
@@ -250,7 +259,9 @@ simulation_table <- function (sim,power_n){
 
 ```
 
-```{r}
+**BMB**: it's nice to add `cache=TRUE` to slow chunks. Also, always good to name all of your code chunks - makes debugging much easier.
+
+```{r sim1, cache=TRUE}
 # input the number of simulations and power we
 # want our model to have, in this case we want 
 # to do 10 to 4000 simulations for every power # from 1 to 5
@@ -295,4 +306,11 @@ ggplot(table_output,aes(x=num_of_simulations,y=power,color=relationship)) + geom
 table_output <- as_tibble(table_output)
 ggplot(table_output,aes(x=num_of_simulations,y=coverage,color=relationship)) + geom_path() + geom_point()
 ```
+
+**BMB**: I'm not sure what's up here, but these results are a little bit surprising/fishy. I think the reason that you get very small effects is that you are raising `x` values in the range (0,1) to higher and higher powers, which will diminish their effects ...
+
+* it's not really worth running and comparing different numbers of simulations; these won't change the estimates of bias/coverage/RMSE/etc., just their accuracy.
+
+mark: 9/10
+
 \newpage
