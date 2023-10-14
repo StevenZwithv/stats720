@@ -1,0 +1,317 @@
+---
+title: "STATS 720 Assignment 2"
+format:
+  pdf:
+    code-line-numbers: true
+author: "Steven Zeng 400260257"
+date: "Oct/10/2023"
+editor: visual
+execute:
+  echo: false
+  message: false
+header-includes:
+  \usepackage{fvextra}
+  \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+bibliorgraphy: references2.bib
+---
+
+\newpage
+
+```{r load_lib}
+#| message: false
+#| warning: false
+library(tidyverse)
+library(rpart)
+library(lvplot)
+library(performance)
+library(dotwhisker)
+library(brglm2)
+library(arm)
+library(bbmle)
+library(DHARMa)
+library(emdbook)
+```
+
+# 1. `kyphosis` data set from `rpart`
+
+According to preliminary data exploration, the `kyphosis` data set has `r ncol(kyphosis)` columns and `r nrow(kyphosis)` rows. Based on the description of the data set @hastie, I plan to include all of the three predictor variables `r colnames(kyphosis)[2:4]`. Our response variable would be `r colnames(kyphosis)[1]`.
+
+## a.
+
+Since our response variable is `r colnames(kyphosis)[1]` which is a dichotomous variable representing whether the patient has kyphosis or not (`present/absent`). I decided to use logistic regression to model our response variable `r colnames(kyphosis)[1]` with predictor variables `r colnames(kyphosis)[2:4]`.
+
+Furthermore, I plan to use `glm()` and binomial family with canonical logit link.
+
+## b.
+
+```{r data_exploratory}
+#head(kyphosis)
+#table(kyphosis$Kyphosis)
+#summary(kyphosis)
+
+# turn kyphosis into a tibble
+kyphosis <- as_tibble(kyphosis)
+
+# draw a bar plot to see distribution of 
+# patients absent of kyphosis and present 
+# of it
+ggplot(data=kyphosis,aes(x=Kyphosis)) + geom_bar()
+
+# draw a histogram to see distribution of 
+# Age among patients absent of kyphosis and # present of it 
+ggplot(data=kyphosis,aes(Age))+geom_freqpoly(aes(color=Kyphosis),binwidth=6) + xlab("Age (in months)")
+
+# draw boxplot with x axis displaying the 
+# response variable Kyphosis 
+# (absent/present) and y axis displaying 
+# Age
+ggplot(data=kyphosis,aes(x=Kyphosis,y=Age)) + geom_boxplot(varwidth=TRUE) + ylab("Age (in months)")
+
+# we can use violin plots to look at 
+# distributions of Age inside categories 
+# absent and present
+ggplot(data=kyphosis,aes(x=Kyphosis,y=Age))+geom_violin() + ylab("Age (in months)")
+
+# draw violin plots to compare 
+# distributions of Kyphosis being 
+# absent/present with respect to number of
+# vertebrae being operated on
+ggplot(data=kyphosis,aes(x=Kyphosis,y=Number)) + geom_violin() + ylab("Number of vertebrae operated in the surgery")
+
+# plot bar graphs to show distribution of 
+# kyphosis absence/presence with respect
+# to number of vertebrae being operated on 
+ggplot(data=kyphosis,aes(x=Number)) + geom_bar(width=1) + xlab("Number of vertebrae operated in the surgery")+ facet_wrap(~Kyphosis,nrow=2)
+
+# similarly, plot violin plot to compare
+# distributions of kyphosis being 
+# present/absent with respect to start 
+# location of vertebrae being operated on
+ggplot(data=kyphosis,aes(x=Kyphosis,y=Start)) + geom_violin() + ylab("Start location of vertebrae being operated in the surgery")
+
+# plot faceted bar graph to compare 
+# distributions of kyohosis being 
+# present/absent with respect to start 
+# location of vertebrae being operated on
+ggplot(data=kyphosis,aes(x=Start)) + geom_bar() + facet_wrap(~Kyphosis,nrow=2)+ xlab("Start location of vertebrae being operated in the surgery")
+```
+
+From all the exploratory graphing analysis above, we get a few takeaways from our data:\
+- It seems that a lot of patients who get kyphosis after surgery are from age `r 100/12` (100 months) to age `r 150/12` (150 months) at the time of the surgery.\
+- It seems that a lot of patients who get kyphosis after surgery have a number of 5 vertebrae operated in the surgery.\
+- No patients get kyphosis after surgery if their vertebra get operated starts from 15.
+
+## c.
+
+```{r data_modelling}
+# fitting logistic regression using glm()
+# using binomial and canonical logit link
+glm_model <- glm(Kyphosis~Age+Number+Start,family=binomial,data=kyphosis)
+```
+
+## d.  
+From diagnostic plots we get below from `base`, `performance::check_model`, and `DHARMa`, we can observe that they display similar results.
+```{r data_diagnostic}
+# diagnostic plots from base R
+plot(glm_model)
+
+# diagnostic plots from 
+# performance::check_model()
+check_model(glm_model)
+
+# diagnostic plots from DHARMa
+testDispersion(glm_model,alternative="two.sided")
+
+# DHARMa plots
+simulationOutput <- simulateResiduals(fittedModel = glm_model, plot = T)
+```
+
+## e.
+From the results that we obtained from our model, we can see that the `intercept` term, `Age`, and `number` are all statistically insignificant using a 0.05 significance level. Moreover, it tells us that:  
+  - The intercept term is zero which means the odds ratio of being present of kyphosis to being absent of it is `1` (i.e., prob.absent = prob.present = 0.5) while he/she has an age of zero at the time of the surgery, has been operated on zero number of vertebrae, and the start location of the vertebrae operated in the surgery is zero.  
+  - The statistically insignificance of age and number indicates that age and number of vertebrae being operated in the surgery have no effects on whether the patient will get kyphosis after the operation.  
+  - The start location of the vertebrae being operated in the surgery is statistically significant under my model. It indicates that as the start location increases by 1, the odds ratio of being present with kyphosis to being absent of it post-operation will decrease (i.e., prob.present will decrease, prob.absent will increase) by a factor of `exp(-0.20651)` which is `0.8134181`.  
+```{r coefficient_plot}
+# check whether absent/present is the base
+# response
+levels(kyphosis$Kyphosis)
+
+summary(glm_model)
+# plot coefficient plot
+dwplot(glm_model,show_intercept=TRUE)
+```
+
+# 2. Gopher tortoise data set
+
+```{r load_tortoise_dataset}
+#| warning: false
+#| message: false
+g_url <- "https://raw.githubusercontent.com/bbolker/mm_workshops/master/data/gopherdat2.csv"
+g_data <- read_csv(g_url)
+```
+
+The data set has `r nrow(g_data)` rows and `r ncol(g_data)` columns.
+
+```{r cleaning}
+g_new <- g_data %>% transmute(site=as_factor(Site),year=as_factor(year),shells=as.integer(shells),type=as_factor(type),area=Area,density=density,prev=prev)
+```
+
+## a.
+
+From below data exploratory analysis, we can observe that:\
+- There is no clear pattern between years (2004,2005,2006) and number of tortoise shells found.\
+- Site CF has the highest number of shells found across all years than other sites.\
+- All shells found are fresh (\<40 months).\
+- According to the data, it would be expected to have more shells found for sites with a larger area.\
+- There does not appear to be a clear relationship between tortoise population density and number of shells found within a site.\
+- There is a clear positive relationship between seroprevalence of M. agassizi and number of shells found.
+
+```{r data_exploration}
+#head(g_data)
+
+# plot line graph to see changes of shells
+# found in different sites in different
+# year
+ggplot(data=g_new,aes(x=year,y=as_factor(shells),color=site,group=interaction(site))) + geom_line() + ylab("Number of shells found") + geom_point() + facet_wrap(~site,nrow=3)
+
+# all shells found are fresh (<40 months)
+# table(g_new$type)
+
+# plot dot plot and smooth geoms to see
+# the relationship between site area and 
+# numebr of shells found for a site
+ggplot(data=g_new,aes(x=area,y=shells)) + geom_jitter(aes(color=site),height=0,alpha=1/2) + geom_smooth(se=FALSE) + xlab("Site area")
+
+# excluding site CF, draw the same plot 
+# again (shells vs. site area)
+g_new %>% filter(site!="CF") %>% ggplot(aes(x=area,y=shells)) + geom_jitter(height=0,aes(color=site),alpha=1/2) + geom_smooth(se=FALSE) + xlab("Site area")
+
+# plot dot plot to see the relationship 
+# between population density and shells 
+# found across regions
+ggplot(data=g_new,aes(x=density,y=shells)) + geom_jitter(aes(color=site),height=0,alpha=1/2) + xlab("Tortoise population density")
+
+# plot dot graph to see the relationship 
+# found between seroprevalence of M. 
+# agassizi and shells found across sites
+ggplot(data=g_new,aes(x=prev,y=shells)) + geom_jitter(height=0,aes(color=site)) + geom_smooth(se=FALSE)
+```
+
+## b.
+
+Since we are fitting `shells` as a response variable, I will first use `glm()` with `family=poisson` and include area as an offset.
+
+```{r tortoise_modelling}
+# using poisson
+tortoise_poi <- glm(data=g_new,shells~year+prev,offset=log(area),family=poisson)
+
+# using negative binomial
+tortoise_nb <- glm.nb(data=g_new,shells~year+prev+offset(log(area)),link="log")
+
+summary(tortoise_poi)
+performance::check_model(tortoise_poi)
+plot(tortoise_poi)
+
+summary(tortoise_nb)
+performance::check_model(tortoise_nb)
+plot(tortoise_nb)
+
+## check for overdispersion for poisson 
+# model below the DHARMa overdispersion 
+# test showed insignificant
+testDispersion(tortoise_poi,alternative="greater")
+simulationOutput <- simulateResiduals(fittedModel = tortoise_poi, plot = T)
+
+## check for overdispersion for negative
+# binomial model below the DHARMa 
+# overdispersion test showed insignificant
+testDispersion(tortoise_nb,alternative="greater")
+simulationOutput <- simulateResiduals(fittedModel = tortoise_nb, plot = T)
+```
+
+## c.
+
+```{r bbmle}
+# fit the same model using bbmle
+tortoise_bbmle <- mle2(shells~dnbinom(mu=exp(logmu)*area,size=exp(logtheta)),parameters=list(logmu~year+prev),data=g_new,start=list(logmu=0,logtheta=0))
+
+summary(tortoise_bbmle)
+```
+
+## d.  
+Customized negative log-likelihood using `mle2()` with `bbmle` parametrization can be seen above. I have tried using `optim()` but could not get similar parameter estimates to the ones obtained from  `glm()` and `mle2()`.  
+```{r customize_NLL}
+# use optim
+# x has 4 colns
+X <- model.matrix(~year+prev+offset(area),data=g_new)
+
+nll <- function(params){
+  beta <- params[-length(params)]
+  theta <- exp(params[length(params)])
+  prob <- plogis(X %*% beta)
+  -sum(dnbinom(g_new$shells,size=theta,mu=prob,log=TRUE))
+}
+
+optim(par=rep(0,5),fn=nll)
+```
+
+## e.  
+The parameter estimates from different approaches are nearly identical. 
+
+As we can observe from below, the profile likelihood C.I. for `glm()` and `mle2()` are nearly identical. However, the Wald C.I. comparing to Profile Likelihood C.I. for `glm()` is always right shifted.
+```{r wald_profile}
+# compare parameters from different approaches
+summary(tortoise_nb)
+summary(tortoise_bbmle)
+
+# profile likelihood C.I.
+confint(tortoise_nb)
+confint(tortoise_bbmle)
+
+# Wald C.I. 
+confint.default(tortoise_nb)
+
+# below would return an error
+# confint.default(tortoise_bbmle)
+```
+
+# 3. Endometrial data
+
+```{r endometrial_load}
+data(endometrial)
+#?endometrial
+```
+
+
+We can observe from below results that parameter estimates, confidence intervals, and p-values differ under methods `glm()`, `glm(...,method="brglmFit)` since:  
+  - `brglmFit` fits glm using implicit and explicit bias reduction methods, and other penalized maximum likelihood methods.  
+  - `glm()` uses maximum likelihood estimation.  
+  - The issue of *quasicomplete separation* arises [@heinze].  
+```{r endometrial_modelling}
+#| warning: false
+# first try logistic regression
+# we can see that the estimate of NV has
+# a very large standard error and it is
+# statistically insignificant
+endo_logistic <- glm(data=endometrial,HG~NV+PI+EH,family=binomial)
+summary(endo_logistic)
+
+# use arm::bayesglm() to fit the model
+#endo_bayes <- bayesglm(data=endometrial,HG~NV+PI+EH,familiy=binomial(link="logit"))
+
+# use glm(...,method="brglmFit")
+endo_brglm <- glm(data=endometrial,HG~NV+PI+EH,method="brglmFit",family=binomial(logit))
+summary(endo_brglm)
+
+# perform likelihood ratio test on glm()
+anova(endo_logistic,test="LRT")
+
+# compare results
+cbind(glm=coef(endo_logistic),brglmfit=coef(endo_brglm))
+
+cbind(glm=confint(endo_logistic),brglmfit=confint(endo_brglm))
+
+cbind(glm_p_val=coef(summary(endo_logistic))[,4],brglm_p_val=coef(summary(endo_brglm))[,4])
+```
+\newpage
+## References
