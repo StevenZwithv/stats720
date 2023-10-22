@@ -22,7 +22,7 @@ bibliorgraphy: references2.bib
 #| warning: false
 library(tidyverse)
 library(rpart)
-library(lvplot)
+library(lvplot) ## BMB: what for?
 library(performance)
 library(dotwhisker)
 library(brglm2)
@@ -45,6 +45,7 @@ Furthermore, I plan to use `glm()` and binomial family with canonical logit link
 ## b.
 
 ```{r data_exploratory}
+## BMB: good.
 #head(kyphosis)
 #table(kyphosis$Kyphosis)
 #summary(kyphosis)
@@ -56,7 +57,8 @@ kyphosis <- as_tibble(kyphosis)
 # patients absent of kyphosis and present 
 # of it
 ggplot(data=kyphosis,aes(x=Kyphosis)) + geom_bar()
-
+## BMB: this could be with(kyphosis, table(Kyphosis))
+## ("if a picture isn't worth 1000 words, the hell with it")
 # draw a histogram to see distribution of 
 # Age among patients absent of kyphosis and # present of it 
 ggplot(data=kyphosis,aes(Age))+geom_freqpoly(aes(color=Kyphosis),binwidth=6) + xlab("Age (in months)")
@@ -96,6 +98,8 @@ ggplot(data=kyphosis,aes(x=Kyphosis,y=Start)) + geom_violin() + ylab("Start loca
 ggplot(data=kyphosis,aes(x=Start)) + geom_bar() + facet_wrap(~Kyphosis,nrow=2)+ xlab("Start location of vertebrae being operated in the surgery")
 ```
 
+**BMB**: very thorough. Could `GGally::ggpairs(...)` ...
+
 From all the exploratory graphing analysis above, we get a few takeaways from our data:\
 - It seems that a lot of patients who get kyphosis after surgery are from age `r 100/12` (100 months) to age `r 150/12` (150 months) at the time of the surgery.\
 - It seems that a lot of patients who get kyphosis after surgery have a number of 5 vertebrae operated in the surgery.\
@@ -121,16 +125,20 @@ check_model(glm_model)
 
 # diagnostic plots from DHARMa
 testDispersion(glm_model,alternative="two.sided")
+## BMB: testing dispersion for Bernoulli outcome rarely makes sense
 
 # DHARMa plots
-simulationOutput <- simulateResiduals(fittedModel = glm_model, plot = T)
+simulationOutput <- simulateResiduals(fittedModel = glm_model, plot = TRUE)
 ```
 
 ## e.
 From the results that we obtained from our model, we can see that the `intercept` term, `Age`, and `number` are all statistically insignificant using a 0.05 significance level. Moreover, it tells us that:  
-  - The intercept term is zero which means the odds ratio of being present of kyphosis to being absent of it is `1` (i.e., prob.absent = prob.present = 0.5) while he/she has an age of zero at the time of the surgery, has been operated on zero number of vertebrae, and the start location of the vertebrae operated in the surgery is zero.  
+  - The intercept term is zero which means the odds ratio of being present of kyphosis to being absent of it is `1` (i.e., prob.absent = prob.present = 0.5) while he/she has an age of zero at the time of the surgery, has been operated on zero number of vertebrae, and the start location of the vertebrae operated in the surgery is zero. 
   - The statistically insignificance of age and number indicates that age and number of vertebrae being operated in the surgery have no effects on whether the patient will get kyphosis after the operation.  
   - The start location of the vertebrae being operated in the surgery is statistically significant under my model. It indicates that as the start location increases by 1, the odds ratio of being present with kyphosis to being absent of it post-operation will decrease (i.e., prob.present will decrease, prob.absent will increase) by a factor of `exp(-0.20651)` which is `0.8134181`.  
+  
+**BMB**: **no**; you're accepting the null hypothesis throughout (you *cannot* conclude that age and number have "no effect". Assuming the intercept is exactly zero is especially weird. We usually don't care about a significance test of the intercept at all.
+
 ```{r coefficient_plot}
 # check whether absent/present is the base
 # response
@@ -140,6 +148,8 @@ summary(glm_model)
 # plot coefficient plot
 dwplot(glm_model,show_intercept=TRUE)
 ```
+
+**BMB**: why show the intercept? Why not scale? (Age has different units from number, start)
 
 # 2. Gopher tortoise data set
 
@@ -179,8 +189,9 @@ ggplot(data=g_new,aes(x=year,y=as_factor(shells),color=site,group=interaction(si
 
 # plot dot plot and smooth geoms to see
 # the relationship between site area and 
-# numebr of shells found for a site
+# number of shells found for a site
 ggplot(data=g_new,aes(x=area,y=shells)) + geom_jitter(aes(color=site),height=0,alpha=1/2) + geom_smooth(se=FALSE) + xlab("Site area")
+## BMB: might be interesting to draw a line corresponding to strict proportionality
 
 # excluding site CF, draw the same plot 
 # again (shells vs. site area)
@@ -220,14 +231,16 @@ plot(tortoise_nb)
 # model below the DHARMa overdispersion 
 # test showed insignificant
 testDispersion(tortoise_poi,alternative="greater")
-simulationOutput <- simulateResiduals(fittedModel = tortoise_poi, plot = T)
+simulationOutput <- simulateResiduals(fittedModel = tortoise_poi, plot = TRUE)
 
 ## check for overdispersion for negative
-# binomial model below the DHARMa 
+# negative binomial model below the DHARMa 
 # overdispersion test showed insignificant
 testDispersion(tortoise_nb,alternative="greater")
-simulationOutput <- simulateResiduals(fittedModel = tortoise_nb, plot = T)
+simulationOutput <- simulateResiduals(fittedModel = tortoise_nb, plot = TRUE)
 ```
+
+**BMB**: what is your conclusion from all of this?
 
 ## c.
 
@@ -239,7 +252,7 @@ summary(tortoise_bbmle)
 ```
 
 ## d.  
-Customized negative log-likelihood using `mle2()` with `bbmle` parametrization can be seen above. I have tried using `optim()` but could not get similar parameter estimates to the ones obtained from  `glm()` and `mle2()`.  
+Customized negative log-likelihood using `mle2()` with `bbmle` parameterization can be seen above. I have tried using `optim()` but could not get similar parameter estimates to the ones obtained from  `glm()` and `mle2()`.  
 ```{r customize_NLL}
 # use optim
 # x has 4 colns
@@ -248,6 +261,8 @@ X <- model.matrix(~year+prev+offset(area),data=g_new)
 nll <- function(params){
   beta <- params[-length(params)]
   theta <- exp(params[length(params)])
+  ## the inverse link function for the location parameter
+  ##   should be exp(), not plogis() ...
   prob <- plogis(X %*% beta)
   -sum(dnbinom(g_new$shells,size=theta,mu=prob,log=TRUE))
 }
@@ -274,6 +289,9 @@ confint.default(tortoise_nb)
 # below would return an error
 # confint.default(tortoise_bbmle)
 ```
+
+**BMB**: it's computationally difficult to work with NB when it converges to 
+Poisson (because the log-likelihood of the dispersion parameter is asymptotically flat)
 
 # 3. Endometrial data
 
@@ -305,6 +323,8 @@ summary(endo_brglm)
 
 # perform likelihood ratio test on glm()
 anova(endo_logistic,test="LRT")
+## BMB: note that these are *sequential* analyses of deviance, which is
+##  usually *not* what what you want.
 
 # compare results
 cbind(glm=coef(endo_logistic),brglmfit=coef(endo_brglm))
@@ -313,5 +333,8 @@ cbind(glm=confint(endo_logistic),brglmfit=confint(endo_brglm))
 
 cbind(glm_p_val=coef(summary(endo_logistic))[,4],brglm_p_val=coef(summary(endo_brglm))[,4])
 ```
+
+mark: 8/10
+
 \newpage
 ## References
