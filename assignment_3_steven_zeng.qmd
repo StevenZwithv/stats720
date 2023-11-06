@@ -1,0 +1,197 @@
+---
+title: "Assignment 3"
+author: "Steven Zeng 400260257"
+date: "Nov/03/2023"
+format:
+  pdf:
+    code-line-numbers: true
+editor: visual
+header-includes:
+  \usepackage{fvextra}
+  \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+bibliography: references3.bib
+---
+
+\newpage
+
+```{r load_libraries}
+#| message: false
+library(mlmRev)
+library(ggplot2); theme_set(theme_bw())
+library(nlme)
+library(lme4)
+library(lmerTest)
+library(glmmTMB)
+library(broom.mixed)
+library(dotwhisker)
+library(tidyverse)
+library(pbkrtest)
+```
+
+# a.
+
+```{r model_fitting}
+#?mlmRev::Early
+
+### fitting using lmer from lmerTest
+# cog as response
+# fixed effects: age, trt
+# random effects: age and its intercept
+# grouping variable: id
+early.lmer <- lmer(cog~age+trt+(1+age|id),data=mlmRev::Early)
+summary(early.lmer)
+
+#help('isSingular')
+
+### fitting using lme
+# again we fit cog as response
+# age, trt as fixed effects
+# intercept and age as random effects with
+# id as grouping variable
+early.lme <- lme(fixed=cog~age+trt,data=mlmRev::Early,random=~1+age|id,control=lmeControl(opt="optim"))
+summary(early.lme)
+
+### extract log-likelihood
+# log-likelihood from two models fitted
+# by lmer() and lme() are quite similar,
+# although lmer() has a slight higher
+# log-likelihood which indicates a better
+# model
+logLik(early.lmer,REML=FALSE)
+logLik(early.lme,REML=FALSE)
+
+### extract restricted log-likelihood
+# we get the same answer from above. 
+# Although restricted log-likelihood 
+# differ slightly for models fitted using
+# lmer() and lme(), lmer() model has a 
+# better fit since it has a higher 
+# restricted log-likelihood
+logLik(early.lmer,REML=TRUE)
+logLik(early.lme,REML=TRUE)
+
+```
+From above analysis, the log-likelihoods (with a difference of `0.034`) and REML log-likelihoods (with a difference of `0.022`) from two models are "slightly different" with model fitted using lmer() having a slightly higher log-likelihoods. Thus, I conclude based on a slightly higher log-likelihood the lmer() model is getting a better fit.
+
+# b.  
+
+Looking at coefficients summaries, the coefficients' estimates for the fixed effects looks "practically identical" or "slightly different" between the two modelling results from the two packages:    
+  - estimates of intercept with a difference of `0.016201`. "slightly different" 
+  - estimates of age with a difference of `0`. "practically identical"
+  - estimates of trt covariate with a difference of `0.028772`. "slightly different".  
+  
+Standard errors (or Wald C.I.):
+  - estimates of SE of `intercept` with a difference of `0.0009`. "very similar"
+  - estimates of SE of `age` with a difference of `0.0046011`. "very similar"
+  - estimates of SE of `trt` with a difference of `0.0022152`. "very similar". 
+
+Moreover, the estimated denominator degrees of freedom `ddf` are "very similar" in terms of `trt` and "different" in terms of `age`:  
+  - lmer() produced `age` with ddf 108.83 and `trt` with ddf 101.06.
+  - lme() produced `age` with ddf 205 and `trt` with ddf 101.
+
+```{r coeff_plot_fixed_effects}
+# scale predictor variable age
+early_scaled <- Early
+early_scaled$age <- scale(Early$age)
+
+# refitting
+early.lmer.sca <- lmer(cog~age+trt+(1+age|id),data=early_scaled)
+
+early.lme.sca <- lme(fixed=cog~age+trt,data=early_scaled,random=~1+age|id,control=lmeControl(opt="optim"))
+
+# extract fix effects estimates
+fixef(early.lme.sca)
+fixef(early.lmer.sca)
+
+# plot coefficient graph
+dwplot(early.lme.sca)
+dwplot(early.lmer.sca)
+
+# get denominator degrees of freedom
+anova(early.lme.sca)
+anova(early.lmer.sca)
+```
+
+# c.  
+As we can observe from below:  
+
+The denominator degrees of freedom from the two methods with model produced by lmer() are different in `age` but slightly different in `trt`:  
+  - Satterthwaite produced age with `ddf` 108.83 and trt with `ddf` 101.06.
+  - Kenward-Roger produced age with `ddf` 102 and trt with `ddf` 101.  
+  
+However, these differences are not that important as two methods both show that both of our covariates `age` and `trt` are statistically significant with $\alpha$ as `0.1, 0.05 or 0.01`.
+```{r satterthwaite_kenward}
+anova(early.lmer.sca,ddf="Satterthwaite")
+anova(early.lmer.sca,ddf="Kenward-Roger")
+
+```
+
+# d.  
+
+We can observe from the graph below that the random effect of age and random effect of intercept follows a negative linear relationship at each level.
+```{r lmer_random_effects}
+#plot(ranef(early.lmer))
+early_random<- ranef(early.lmer.sca) %>% as.data.frame()
+
+plot(x=early_random$condval[early_random$term=="age"],y=early_random$condval[early_random$term=="(Intercept)"],xlab="Random intercept",ylab="Random effect of age",sub="Plot of random effect of age at each level (id/individual) versus random intercept")
+```
+
+# e.  
+
+We know that `trt` is a factor variable with two levels "Y" or "N" representing whether the infant was in the treatment group who were chosen to be exposed to an enriched environment or not. Therefore, every infant was chosen to be in one and only one group meaning they are either in the control group or the treatment group and they cannot be in any other unknown group. Thus, it does not make sense to treat `trt` as a random effect. (i.e., the population of all African American children can either be in 'yes' or 'no' group for covariate `trt`) Furthermore, categorical variable `trt` represents the exhaustive set of possible values (i.e., yes or no) and in reality there is no other possibilities (thus not random) besides one having been exposed to the enriched environment or one having not being exposed to the environment.   
+
+
+# f.  
+
+We want to model `age` as one of the random effects since we might be interested in children with a different age and here we are treating age as a random variable with our data only representing a sample of the all the possible values of age (i.e., there are values of age other than 1, 1.5 and 2). We would also like to model `age` as a fixed effect as well since we might want to access the effect of age within our sampled data meaning we want to investigate the influence of age on cognitive score with respect to our `103` sampled children who were recorded to have age measured only at 1, 1.5 and 2. 
+
+# g.  
+
+## 1.  
+```{r indep_intercept_and_age}
+early.lmer.inde <- lmer(cog~age+trt+(1+age||id),data=early_scaled)
+```
+
+## 2.  
+
+```{r intercept_vari_only}
+early.lmer.inter <- lmer(cog~age+trt+(1|id),data=early_scaled)
+```
+
+Comparing model of 
+`cog~age+trt+(1|id)` with `cog+age+trt+(1+age||id)`
+
+
+Since our two models only differ by random effects terms, we can test the statistical significance of the random term using likelihood-ratio test.
+As we can see from the below results, the model with intercept only as random effect has a smaller AIC than the one with independent age and intercept as random effects (a difference of `1.9`). However, the result also shows that two models do not differ from each other in terms of statistical significance with $\alpha$ of 0.1, 0.05, or 0.01.
+
+```{r comparing_models}
+anova(early.lmer.inter,early.lmer.inde)
+```
+
+Comparing the full model: `cog~age+trt+(1+age|id)` with `cog~age+trt+(1+age||id)`.
+
+Although we are having singular fit problem like below, we do can confirm that the independence assumption in the independence model is statistically significant with $\alpha$ level of 0.1 and 0.05.
+
+
+```{r comparing_full_indep}
+#| warning: false
+#| cache: true
+set.seed(1)
+PBmodcomp(largeModel=early.lmer.sca,smallModel=early.lmer.inde)
+```
+Comparing the model `cog~age+trt+(1+age||id)` with
+`cog~age+trt+(1|id)`
+
+As below results suggest, the model with only intercept as the random effect and the model with independent intercept and age as random effects do not differ from each other statistical significantly with $\alpha$ 0.1, 0.05 and 0.01.
+```{r comparing_indep_inter}
+#| cache: true
+
+set.seed(1)
+PBmodcomp(largeModel=early.lmer.inde,smallModel=early.lmer.inter)
+```
+
+
+
+\newpage
+# References
