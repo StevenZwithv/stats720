@@ -1,0 +1,607 @@
+---
+title: "Homework 4 - STATS 720"
+author: "Steven Zeng"
+date: "Nov/29/2023"
+format: pdf
+editor: visual
+bibliography: reference4.bib
+---
+
+```{r load_libraries}
+#| message: false
+library(faraway)
+library(tidyverse)
+library(softImpute)
+library(lme4) # use lmer()
+library(mlmRev) # for Contraception data
+library(glmmTMB) # use simulate_new()
+library(MASS)
+library(nlme) # for intervals()
+library(performance)
+library(ggeffects) # for ggpredict and ggeffect
+library(rstanarm) # for stan_lmer
+library(MASS) # for glmmPQL
+library(dotwhisker) # for dwplot
+library(DHARMa) # for checking residual plots
+library(MCMCglmm) # for MCMCglmm()
+library(bayesplot)
+library(shinystan)
+library(broom.mixed) # for tidy()
+library(bayestestR) # for diagnostic_posterior
+```
+
+# 1.
+
+## Missing value treatment
+
+Since preliminary analysis indicates that both average height and average weight for males and females do not differ greatly from each other across all age levels (0\~80 months), I will impute the missing values in weight and height using mean values within a specific age group (0~5,5~10,...,65\~80).
+
+```{r missing_value_treatment}
+#?nepali
+#str(nepali)
+#summary(nepali)
+
+# note id uniquely identifies a child
+
+nep <- nepali
+
+# convert 'sex' to a factor variable
+nep$sex <- factor(nep$sex,levels=c("1","2"),labels=c("male","female"))
+
+# convert 'lit' to a factor variable
+nep$lit <- factor(nep$lit,levels=c("0","1"),labels=c("no","yes"))
+
+# to use tidyverse
+nep <- as_tibble(nep)
+
+# wt and ht contains 123 NAs
+### missingness due to data that is hard to
+### obtain, i.e., unable to get access to
+### the child
+# missing value analysis
+
+# quite `normally` distributed
+ggplot(aes(x=ht),data=nep) + geom_histogram()
+
+#unique(nep$age)
+# bimodal distribution for age
+# 0~40 and 40~80 months
+ggplot(aes(x=age),data=nep) + geom_histogram(bins=40)
+
+# not surprisingly, ht and age follows 
+# positive linear relationship
+ggplot(aes(x=age,y=ht),data=nep) + geom_point()
+
+nep.meanht <- nep %>% group_by(sex,age) %>% summarise(ht=mean(ht,na.rm=TRUE))
+
+# height for male and female do not differ 
+# greatly from each other for a specific 
+# 'age'
+ggplot(aes(x=age,y=ht),data=nep.meanht) + geom_point(aes(group=sex,color=sex),alpha=0.5)
+
+# Thus, we impute missing values for height # for each age group, since over 65 months, # we have few obs., bin them in one group
+age.cut <- cut(nep$age,breaks=(c(seq(-1,65,5),80)))
+nep.new <- nep %>% mutate(age_level=age.cut) 
+nepht.mean <- nep.new %>% group_by(age_level) %>% summarize(mean=mean(ht,na.rm=TRUE))
+
+# impute ht with mean respective to age
+nep.na <- nep.new %>% filter(is.na(ht))
+
+nepht.imp <- inner_join(x=nepht.mean,y=nep.na) %>% mutate(ht=if_else(age!=0,mean,0))
+
+### Similarly to impute wt missing var.
+# weight do not vary much from male to female
+# for a specific age group
+nep.new %>% group_by(sex,age) %>% summarise(meanwt=mean(wt,na.rm=TRUE)) %>% ggplot(aes(x=age,y=meanwt,group=sex,color=sex)) + geom_point(alpha=0.5)
+
+nep.imp <- inner_join(nep.new %>% group_by(age_level) %>% summarise(meanwt=mean(wt,na.rm=TRUE)),y=nepht.imp) %>% mutate(wt=if_else(age!=0,meanwt,0)) %>% dplyr::select(c(4:12)) %>% ungroup()
+
+# replace the missing row with imputed ones
+nep.part <- nep %>% filter(!is.na(wt))
+
+### final data set with imputed wt and ht
+nep.final <- bind_rows(nep.part,nep.imp)
+
+### one thing to note we can not have
+### a child shrink its height, height
+### cannot decrease with age
+nep.adj <- nep.final %>% group_by(id) %>% summarise(lag=lead(ht,order_by=id)-ht,age)
+
+# id 360991 seems not reasonable
+nep.adj %>% group_by(id) %>% filter(lag<0 & lag!="NA") %>%  summarise(cn=n())
+
+# at age 22 month, we see a decrease in 
+# height which is an impossible situation, 
+# we then use avg of height between age 19 
+# and 26 month
+nep.final %>% filter(id==360991) %>% dplyr::select(ht,age) %>% arrange(age)
+
+nep.final <- nep.final %>% mutate(ht=if_else(age==22 & id==360991,mean(71.8,73.2),ht))
+```
+
+## Data Exploration
+
+-   We can observe from the code below that male has a slightly large median weight than female.
+-   Weight is increasing with age overall.
+
+```{r data_exploration}
+# correlation indicates `wt` and `ht` are
+# highly positively correlated with `age`
+#cor(nep_new[,c(3,4,9)])
+
+# plot data
+# our response will be `weight`
+# plot wt vs. sex
+ggplot(aes(x=sex,y=wt),data=nep.final) + geom_boxplot(aes(group=sex))
+
+# plot wt vs. age
+ggplot(aes(x=age,y=wt,group=id,color=id),data=nep.final) + geom_point(alpha=0.3) + geom_line() +ylab("Weight") +xlab("Age of the child") + labs(title="Plot of Weight vs. age for each child")
+
+# plot wt vs. age group by sex
+ggplot(aes(x=age,y=wt,group=id,color=sex),data=nep.final) + geom_point(alpha=0.3) + geom_line() +ylab("Weight") +xlab("Age of the child") + labs(title="Plot of Weight vs. age grouped by sex")
+```
+
+## Model Fitting
+
+Below is the model fit:   
+  - model wt as response  
+  - lit, died, alive, mage as fixed effects   
+  - age given id as random effect  
+  - age also as a fixed effect  
+
+```{r model_fitting}
+nep.final$id <- as.factor(nep.final$id)
+# model wt as the response
+nep.mod <- lmer(wt~(age|id)+lit+died+alive+mage+age,data=nep.final)
+```
+
+There does not seem to be any violations to model assumptions: - constant variance - residual with mean 0 - linearity
+
+```{r model_diagnostics}
+# get model diagnostics
+#plot(nep.mod)
+
+check_model(nep.mod)
+#simulateResiduals(nep.mod,plot=T)
+```
+
+The model results indicate that: - the literacy of mother is negatively associated with weight of child\
+- mother who has more children died would have a child with lower weight\
+- mother who has more children alive would have a child with higher weight\
+- we would see a higher weight in children who have a mother with higher age
+
+```{r model_interpretation}
+summary(nep.mod)
+```
+
+## Plotting
+
+```{r ggpredict plots}
+nep.eff <- ggpredict(nep.mod,terms="lit")
+plot(nep.eff,connect_lines = TRUE)
+
+nep.eff1 <- ggpredict(nep.mod,terms="died")
+plot(nep.eff1)
+
+nep.eff2 <- ggpredict(nep.mod,terms="alive")
+plot(nep.eff2)
+
+nep.eff3 <- ggpredict(nep.mod,terms="mage")
+plot(nep.eff3)
+
+# only plot subset of children since
+# we have an error, running out of 
+# colours
+nep.eff4 <- ggpredict(nep.mod,terms=c("age","id[120011,120061,120052,120031,120023]"),type="random")
+plot(nep.eff4,ci_style = "errorbar")
+
+nep.eff5 <- ggpredict(nep.mod,terms=c("age"),type="fixed")
+plot(nep.eff5,ci_style = "errorbar")
+```
+
+According to [@west], `age` is in units of months.
+
+## Comparing to the original paper
+Looking at the original paper [@west], the analysis is quite different than the one I did above. In the paper, the group of Nepali children are split into two groups: a control group and a treatment group. Furthermore, the treatment group are being supplied with vitamin A every 4 months and followed for 16 months. Then, the effect of vitamin A are evaluated with respective to arm circumference, weight, height, muscle and fat area. In this case, `control` or `treatment` is the grouping factor. 
+
+# 2.
+
+## Data Exploration
+
+From the below exploratory analysis, we can observe that: - women with many living children tend to use contraception than ones with fewer children - women who reside in rural area tend not to use contraception than ones who reside in cities
+
+```{r contraception_exploration}
+#str(Contraception)
+
+contraception <- as_tibble(Contraception)
+
+# plot use vs. # of living children
+contraception %>% group_by(livch,use) %>% count() %>% ggplot(aes(x=livch,y=use)) + geom_tile(aes(fill=n))
+
+# plot age vs. use
+contraception %>% ggplot(aes(x=age)) + geom_freqpoly(aes(color=use))
+
+# plot use vs. urban
+contraception %>% group_by(urban,use) %>% count() %>% ggplot(aes(x=urban,y=use)) + geom_tile(aes(fill=n))
+```
+
+## Model Fitting
+
+According to our exploratory analysis, we fit:   
+  - logistic regression   
+  - we fit livch, age, urban as fixed effects   
+  - we allow random intercept and slope for urban within each district  
+
+After fitting the model, we can see that:   
+  - as the number of children increases, the prob of the mom uses contraception increases   
+  - women who have age older than average age, the prob of the women uses contraception decreases   
+  - women who from urban area tend to use contraception than ones from rural area  
+
+After checking model assumptions, there does not seem to be any serious violations in model assumptions. One point to note is that the residuals does not seem to fall exactly on the line in the Normality of Residuals plot.
+
+```{r contraception_fit}
+contra.mod <- glmer(use~livch+age+urban+(urban|district),data=contraception,family=binomial)
+
+# model summary
+summary(contra.mod)
+
+
+# check model assumption
+check_model(contra.mod)
+#simulateResiduals(contra.mod,plot=T)
+```
+
+## Plotting
+
+```{r contra_plot}
+
+# plot predicted prob of usage 
+# vs urban for different district
+contra.eff <- ggpredict(contra.mod,terms=c("urban","district[1,2,3,4,5]"),type="random")
+plot(contra.eff,connect_lines = TRUE)
+
+# plot predicted prob. of usage 
+# vs age
+contra.eff1 <- ggpredict(contra.mod,terms=c("age","urban"),type="fixed")
+contra.plt <- plot(contra.eff1,connect_lines = TRUE)
+
+contra.plt + stat_sum(data=contraception,aes(x = age, y = as.numeric(use)-1, colour = urban),fill =NA)+stat_summary(data = contraception,aes(x = age, y = as.numeric(use)-1, colour = urban),fill = NA,geom = "point",fun = mean)
+```
+
+## Coefficients plots
+
+As we can observe from the below fixed coefficient plot, the fixed effects do not differ from each other significantly for the four different method:   
+  - model 1: complete pooling   
+  - model 2: penalized quasi-likelihood   
+  - model 3: Laplace   
+  - model 4: Adaptive Gauss-Hermite
+
+```{r coeff_plots}
+# complete pooling
+contra.glm <- glm(use~livch+age+urban,family=binomial,data=contraception)
+
+# penalized quasi-likelihood
+contra.glmmpql <- glmmPQL(use~livch+age+urban,random=~urban|district,family=binomial,data=contraception,niter=10)
+
+# Laplace approximation
+contra.lap <- glmer(use~livch+age+urban+(urban|district),data=contraception,family=binomial,nAGQ=1)
+
+# Adaptive Gauss-Hermite quadrature using 20
+# quadrature points
+contra.ada <- glmer(use~livch+age+urban+(1|district),data=contraception,family=binomial,nAGQ=20)
+
+dwplot(list(contra.glm,contra.glmmpql,contra.lap,contra.ada),effects="fixed")
+```
+
+## Comparing to the original paper
+  - Umm, I think we do not have access to the paper [@ng]
+
+# 3. Redo the `nepali` data set.
+
+```{r nepali_MCMCglmm}
+nepali_MCMC <- MCMCglmm(wt~mage+lit+died+alive+age,random=~us(1+age):id,data=nep.final)
+
+lattice::xyplot(nepali_MCMC$VCV)
+
+#x11()
+plot(nepali_MCMC)
+```
+
+Looking at the diagnostics for our `stan_lmer` model below, our model seems reasonable. Specifically:  
+  - `Rhat` is close to 1 and not larger than 1.1.
+  - `ESS`, effective sample size is larger than 1000.
+  - Not sure whether MCSE is small enough.
+
+```{r nepali_rstanarm, cache=TRUE}
+nepali_stan <- stan_lmer(wt ~ mage+lit+died+alive+age+ (age|id),prior_PD = TRUE, data = nep.final, chains = 1,seed = 1,refresh = 0)
+
+nepali_stan.dw <- tidy(nepali_stan, conf.int = TRUE)
+dwplot(nepali_stan.dw)
+
+mcmc_trace(nepali_stan, regex_pars = "^Sigma") +scale_y_log10()
+
+diagnostic_posterior(nepali_stan, effects = "all",parameters = "^Sigma")
+
+#prior_summary(nepali_stan)
+#plot(nepali_stan, pars = c("(Intercept)", "age"))
+#plot(nepali_stan, regex_pars = "Sigma")
+
+nepali_fit <- stan_lmer(wt ~ mage+lit+died+alive+age+ (age|id),data = nep.final, chains = 4)
+
+print(bayestestR::diagnostic_posterior(nepali_fit),digits = 4)
+
+launch_shinystan(nepali_fit)
+
+mcmc_trace(nepali_fit, regex_pars= "Sigma")
+mcmc_rank_overlay(nepali_fit, regex_pars= "Sigma")
+```
+
+# 4.
+
+## simfun
+
+```{r simfun}
+simfun <- function(beta,theta,n,ngrp){
+  
+  x <- rnorm(n,mean=0,sd=1)
+  g <- factor(rep(seq(ngrp),times=n/ngrp),levels=c(seq(ngrp)))
+  dt <- data.frame(x,g)
+  
+  y <- simulate(~1+x+(1|g)
+                    ,nsim=1
+                ,newdata=dt
+                    ,family=poisson
+                    ,newparams=list(
+                      beta=beta
+                      ,theta=theta
+                    ))
+  
+  dt <- data.frame(x,g,y)
+  colnames(dt)[3] <- "y"
+  return(dt)
+}
+```
+
+## fitfun
+
+```{r fitfun}
+fitfun <- function(data,nAGQ){
+  if (nAGQ==-2){
+    mod.fit <- glm(y~1+x
+                   ,family=poisson
+                     ,data=data)
+    mod.coef <- coef(mod.fit)
+    mod.conf <- confint(mod.fit)
+  }
+  else if(nAGQ==-1){
+    mod.fit <- glmmPQL(y~1+x
+                       ,random=~1|g
+                       ,family=poisson
+                       ,data=data)
+    mod.coef <- fixef(mod.fit)
+    mod.conf <- intervals(mod.fit,which="fixed")$fixed[,-2]
+    colnames(mod.conf) <- c("2.5 %","97.5%")
+  }
+  else if(nAGQ>=1){
+    if (nAGQ==1){
+      # Laplace
+      mod.fit <- glmer(y~1+x+(1|g),data=data,family=poisson,nAGQ=1)
+      mod.coef <- fixef(mod.fit)
+      mod.conf <- confint(mod.fit,method="profile")[-1,]
+    }
+  else if(nAGQ>1){
+      #AGHQ
+    mod.fit <- glmer(y~1+x+(1|g),data=data,family=poisson,nAGQ=nAGQ)
+    mod.coef <- fixef(mod.fit)
+    mod.conf <- confint(mod.fit)[-1,]
+    }
+  }
+  return(list(mod.coef,mod.conf))
+}
+```
+
+## Run
+
+### Intercept is -2
+```{r fun.run,cache=TRUE}
+#| message: FALSE
+fun.run <- function(beta,theta,n,ngrp,nAGQ){
+  fitfun(simfun(beta=beta, theta = theta, n=n,ngrp=ngrp),nAGQ=nAGQ)
+}
+
+# where
+beta=c(-2,0.5)
+theta = 1
+n=500
+ngrp=100
+
+
+interglm <- rep(0,100)
+x_glm <- rep(0,100)
+x_covglm <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=-2)
+  interglm[i] <- fun.main[[1]][1]
+  x_glm[i] <- fun.main[[1]][2]
+  x_covglm[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+
+interpql <- rep(0,100)
+x_pql <- rep(0,100)
+x_covpql <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=-1)
+  interpql[i] <- fun.main[[1]][1]
+  x_pql[i] <- fun.main[[1]][2]
+  x_covpql[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+
+interlap <- rep(0,100)
+x_lap <- rep(0,100)
+x_covlap <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=1)
+  interlap[i] <- fun.main[[1]][1]
+  x_lap[i] <- fun.main[[1]][2]
+  x_covlap[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+
+interada <- rep(0,100)
+x_ada <- rep(0,100)
+x_covada <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=10)
+  interada[i] <- fun.main[[1]][1]
+  x_ada[i] <- fun.main[[1]][2]
+  x_covada[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+```
+
+#### Bias, Variance, RMSE, Coverage Analysis
+
+```{r clean}
+### Clean and aggregate
+col1 <- c("glm with beta=-2: intercept","glmmpql with beta=-2: intercept","Laplace with beta=-2: intercept","Adaptive GH with beta=-2: intercept","glm with beta=-2: x","glmmpql with beta=-2: x","Laplace with beta=-2: x","Adaptive GH with beta=-2: x")
+
+# Bias
+col2 <- c(round(mean(interglm-(-2)),4),
+          round(mean(interpql-(-2)),4),
+          round(mean(interlap-(-2)),4),
+          round(mean(interada-(-2)),4),
+          round(mean(x_glm-(0.5)),4),
+          round(mean(x_pql-(0.5)),4),
+          round(mean(x_lap-(0.5)),4),
+          round(mean(x_ada-(0.5)),4))
+
+# Variance
+col3 <- c(round(var(interglm),4),
+          round(var(interpql),4),
+          round(var(interlap),4),
+          round(var(interada),4),
+          round(var(x_glm),4),
+          round(var(x_pql),4),
+          round(var(x_lap),4),
+          round(var(x_ada),4))
+
+# scaled RMSE
+col4 <- c(round(sqrt(mean((interglm - (-2))^2)),4),
+          round(sqrt(mean((interpql - (-2))^2)),4),
+          round(sqrt(mean((interlap - (-2))^2)),4),
+          round(sqrt(mean((interada - (-2))^2)),4),
+          round(sqrt(mean((x_glm - 0.5)^2)),4),
+          round(sqrt(mean((x_pql - 0.5)^2)),4),
+          round(sqrt(mean((x_lap - 0.5)^2)),4),
+          round(sqrt(mean((x_ada - 0.5)^2)),4))
+
+col5 <- c(rep("NA",4),mean(x_covglm),mean(x_covpql),mean(x_covlap),mean(x_covada))
+
+tb.clean <- cbind(col1,col2,col3,col4,col5)
+colnames(tb.clean) <- c("Method","Bias","Variance","RMSE","Coverage")
+```
+
+### Intercept is 2
+
+```{r fun.run2,cache=TRUE}
+#| message: FALSE
+fun.run <- function(beta,theta,n,ngrp,nAGQ){
+  fitfun(simfun(beta=beta, theta = theta, n=n,ngrp=ngrp),nAGQ=nAGQ)
+}
+
+# where
+beta=c(2,0.5)
+theta = 1
+n=500
+ngrp=100
+
+
+interglm <- rep(0,100)
+x_glm <- rep(0,100)
+x_covglm <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=-2)
+  interglm[i] <- fun.main[[1]][1]
+  x_glm[i] <- fun.main[[1]][2]
+  x_covglm[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+
+interpql <- rep(0,100)
+x_pql <- rep(0,100)
+x_covpql <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=-1)
+  interpql[i] <- fun.main[[1]][1]
+  x_pql[i] <- fun.main[[1]][2]
+  x_covpql[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+
+interlap <- rep(0,100)
+x_lap <- rep(0,100)
+x_covlap <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=1)
+  interlap[i] <- fun.main[[1]][1]
+  x_lap[i] <- fun.main[[1]][2]
+  x_covlap[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+
+interada <- rep(0,100)
+x_ada <- rep(0,100)
+x_covada <- rep(0,100)
+
+for (i in seq(100)){
+  fun.main <- fun.run(beta,theta,n,ngrp,nAGQ=10)
+  interada[i] <- fun.main[[1]][1]
+  x_ada[i] <- fun.main[[1]][2]
+  x_covada[i] <- ifelse(between(0.5,fun.main[[2]][2],fun.main[[2]][4]),1,0)
+}
+```
+
+#### Bias, Variance, RMSE, Coverage Analysis
+```{r clean}
+### Clean and aggregate
+col1 <- c("glm with beta=2: intercept","glmmpql with beta=2: intercept","Laplace with beta=2: intercept","Adaptive GH with beta=2: intercept","glm with beta=2: x","glmmpql with beta=2: x","Laplace with beta=2: x","Adaptive GH with beta=2: x")
+
+# Bias
+col2 <- c(round(mean(interglm-(2)),4),
+          round(mean(interpql-(2)),4),
+          round(mean(interlap-(2)),4),
+          round(mean(interada-(2)),4),
+          round(mean(x_glm-(0.5)),4),
+          round(mean(x_pql-(0.5)),4),
+          round(mean(x_lap-(0.5)),4),
+          round(mean(x_ada-(0.5)),4))
+
+# Variance
+col3 <- c(round(var(interglm),4),
+          round(var(interpql),4),
+          round(var(interlap),4),
+          round(var(interada),4),
+          round(var(x_glm),4),
+          round(var(x_pql),4),
+          round(var(x_lap),4),
+          round(var(x_ada),4))
+
+# scaled RMSE
+col4 <- c(round(sqrt(mean((interglm - (2))^2)),4),
+          round(sqrt(mean((interpql - (2))^2)),4),
+          round(sqrt(mean((interlap - (2))^2)),4),
+          round(sqrt(mean((interada - (2))^2)),4),
+          round(sqrt(mean((x_glm - 0.5)^2)),4),
+          round(sqrt(mean((x_pql - 0.5)^2)),4),
+          round(sqrt(mean((x_lap - 0.5)^2)),4),
+          round(sqrt(mean((x_ada - 0.5)^2)),4))
+
+col5 <- c(rep("NA",4),mean(x_covglm),mean(x_covpql),mean(x_covlap),mean(x_covada))
+
+tb.clean <- cbind(col1,col2,col3,col4,col5)
+colnames(tb.clean) <- c("Method","Bias","Variance","RMSE","Coverage")
+```
+
+
