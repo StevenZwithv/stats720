@@ -1,0 +1,4 @@
+generally looks good.
+Avoid using red/green contrasts (about 8% of males can't distinguish these colors)
+You could use facet_wrap(~urban) to separate by urban/rural
+Had to do some tweaking of plot labels to get this to actually run

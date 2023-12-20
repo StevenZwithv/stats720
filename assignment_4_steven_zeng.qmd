@@ -298,14 +298,18 @@ dwplot(list(contra.glm,contra.glmmpql,contra.lap,contra.ada),effects="fixed")
 
 # 3. Redo the `nepali` data set.
 
-```{r nepali_MCMCglmm}
+```{r nepali_MCMCglmm, cache=TRUE}
 nepali_MCMC <- MCMCglmm(wt~mage+lit+died+alive+age,random=~us(1+age):id,data=nep.final)
-
-lattice::xyplot(nepali_MCMC$VCV)
-
-#x11()
-plot(nepali_MCMC)
 ```
+
+```{r fig.width = 12, fig.height=8}
+lattice::xyplot(nepali_MCMC$VCV)
+```
+
+```{r fig.width = 12, fig.height=8}
+lattice::xyplot(nepali_MCMC$VCV)
+```
+
 
 Looking at the diagnostics for our `stan_lmer` model below, our model seems reasonable. Specifically:  
   - `Rhat` is close to 1 and not larger than 1.1.
@@ -327,10 +331,12 @@ diagnostic_posterior(nepali_stan, effects = "all",parameters = "^Sigma")
 #plot(nepali_stan, regex_pars = "Sigma")
 
 nepali_fit <- stan_lmer(wt ~ mage+lit+died+alive+age+ (age|id),data = nep.final, chains = 4)
+```
 
+```{r nepali_rstanarm_diag}
 print(bayestestR::diagnostic_posterior(nepali_fit),digits = 4)
 
-launch_shinystan(nepali_fit)
+## launch_shinystan(nepali_fit)
 
 mcmc_trace(nepali_fit, regex_pars= "Sigma")
 mcmc_rank_overlay(nepali_fit, regex_pars= "Sigma")
@@ -564,7 +570,7 @@ for (i in seq(100)){
 ```
 
 #### Bias, Variance, RMSE, Coverage Analysis
-```{r clean}
+```{r clean2}
 ### Clean and aggregate
 col1 <- c("glm with beta=2: intercept","glmmpql with beta=2: intercept","Laplace with beta=2: intercept","Adaptive GH with beta=2: intercept","glm with beta=2: x","glmmpql with beta=2: x","Laplace with beta=2: x","Adaptive GH with beta=2: x")
 

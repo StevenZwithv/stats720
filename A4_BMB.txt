@@ -1,0 +1,9 @@
+thank you for labeling chunks!
+single imputation is dicey (I should have spent more time on this in class)
+looking at *marginal* distributions of data is rarely useful
+interesting that convergence warning gives such a big gradient; scaling age and mage actually takes care of this
+I would probably have allowed age effect to vary by district ...
+Should always scale predictors if plotting a coefficient plot!
+Comment on results of simulation?
+
+9.5

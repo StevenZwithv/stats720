@@ -75,7 +75,7 @@ dwplot(list(con.glmer,con.gam),effects="fixed")
 ## Model Fitting
 
 Looking at the predictions plots below, two plots look very similar except that the plot fitted age as a thin plate spline has a more tilted tails when approaching the left end and right end of scaled age values.  
-```{r model_fit}
+```{r model_fit2}
 con.gam2 <- gam(use_n~poly(age_sc,2)+urban+s(district,bs="re"),family=binomial,data=Contraception)
 
 con.gam3 <- gam(use_n~s(age_sc,bs="tp")+s(district,bs="re")+urban,family=binomial,data=Contraception)
@@ -94,7 +94,7 @@ plot2 <- plot(ggemmeans(con.gam3,terms=c("age_sc [all]","urban"))) + ssb
 
 Similarly, we can see from the below plots that they look very similar except that the model which separates thin-plate splines for age_sc for urban and rural settings has slightly tilted tails on the left most and right most age values.   
 
-```{r model_fit}
+```{r model_fit3}
 con.gam4 <- gam(use_n~poly(age_sc,2)+urban+s(district,bs="re")+poly(age_sc,2):urban,family=binomial,data=Contraception)
 
 con.gam5 <- gam(use_n~s(age_sc,bs="tp",by=urban)+s(district,bs="re")+urban,family=binomial,data=Contraception)
@@ -110,7 +110,7 @@ plot4 <- plot(ggemmeans(con.gam5,terms=c("age_sc [all]","urban"))) + ssb
 ## Model Fitting  
 
 As we can tell from the graphs below, the model that includes a fixed quadratic-age by urban/rural interaction and a random effect that allows the quadratic effect of age to vary across districts leads to a more condensed fit and a more extreme tilted fit when approaching the left most and right most scaled age values. However, in my opinion they look quite similar.     
-```{r model_fit, cache=TRUE}
+```{r model_fit4, cache=TRUE}
 con.glmer2 <- glmer(use_n~poly(age_sc,2):urban+(poly(age_sc,2)|district),family=binomial,data=Contraception)
 
 con.gam6 <- gam(use_n~s(age_sc, district, bs = "fs")+s(age_sc,by=urban,bs="tp"),family=binomial,data=Contraception)
